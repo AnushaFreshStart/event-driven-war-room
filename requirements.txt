@@ -1,3 +1,6 @@
 confluent-kafka
 python-dotenv
 slack-bolt
+exa-py
+openai
+requests

@@ -6,7 +6,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from confluent_kafka import Producer, Consumer, KafkaError
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # Initialize Slack App
 app = App(token=os.environ.get("SLACK_BOT_TOKEN"))

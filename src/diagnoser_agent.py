@@ -10,6 +10,7 @@ KAFKA_BROKER = 'localhost:9092'
 producer = Producer({'bootstrap.servers': KAFKA_BROKER})
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "mock-openrouter-key")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 if OPENROUTER_API_KEY != "mock-openrouter-key" and OPENROUTER_API_KEY:
     client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
 else:
@@ -17,17 +18,31 @@ else:
 
 def simulate_openrouter_diagnosis(original_text, research_context):
     if client:
-        print(f"[Diagnoser Agent] Synthesizing REAL context via OpenRouter...")
+        print(f"[Diagnoser Agent] Synthesizing REAL context via OpenRouter using model {OPENROUTER_MODEL}...")
         try:
             prompt = f"An incident occurred: {original_text}\n\nHere is the background research:\n{research_context}\n\nPlease provide a brief, professional incident diagnosis and recommend a fix (e.g. executing a rollback if necessary)."
-            response = client.chat.completions.create(
-                model="anthropic/claude-3.5-sonnet",
-                messages=[
-                    {"role": "system", "content": "You are an expert DevOps AI assistant."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            return f":mag: *AI Diagnosis*\n{response.choices[0].message.content}"
+            models_to_try = [OPENROUTER_MODEL]
+            if OPENROUTER_MODEL != "openai/gpt-4o-mini":
+                models_to_try.append("openai/gpt-4o-mini")
+
+            last_error = None
+            for model_name in models_to_try:
+                try:
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": "You are an expert DevOps AI assistant."},
+                            {"role": "user", "content": prompt}
+                        ]
+                    )
+                    return f":mag: *AI Diagnosis*\n{response.choices[0].message.content}"
+                except Exception as e:
+                    last_error = e
+                    print(f"[Diagnoser Agent] Model {model_name} failed: {e}")
+                    if "404" not in str(e):
+                        break
+
+            return f"OpenRouter API failed: {last_error}"
         except Exception as e:
             return f"OpenRouter API failed: {e}"
     else:

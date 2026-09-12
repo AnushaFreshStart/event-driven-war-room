@@ -48,6 +48,7 @@ To ensure the high-stakes Executive Agent performs safely, we used the **ToolGra
    ```
 
 ## Documentation
+- See [API_SETUP.md](API_SETUP.md) for step-by-step instructions on acquiring Exa, OpenRouter, and Auth0 API keys.
 - See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagrams.
 - See [AGENT_FLOWS.md](AGENT_FLOWS.md) for internal agent logic and event contracts.
 

@@ -4,3 +4,5 @@ slack-bolt
 exa-py
 openai
 requests
+pytest
+pytest-mock

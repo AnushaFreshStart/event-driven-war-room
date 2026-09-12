@@ -93,3 +93,6 @@ docker exec redpanda rpk topic describe slack-inbound --brokers localhost:9092
 
 ### In this repo
 The broker itself is started from `docker-compose.yml`, and the topics are automatically created in `start_all.bat` before the Python services launch using the exact pattern the app expects.
+
+### Run tests
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt; .\.venv\Scripts\python.exe -m pytest -q

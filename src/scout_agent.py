@@ -1,14 +1,34 @@
 import json
 import re
 from confluent_kafka import Producer, Consumer, KafkaError
+import os
+from dotenv import load_dotenv
 
 KAFKA_BROKER = 'localhost:9092'
-
 producer = Producer({'bootstrap.servers': KAFKA_BROKER})
 
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+
+from exa_py import Exa
+
+EXA_API_KEY = os.environ.get("EXA_API_KEY", "mock-exa-key")
+if EXA_API_KEY != "mock-exa-key" and EXA_API_KEY:
+    exa = Exa(EXA_API_KEY)
+else:
+    exa = None
+
 def simulate_exa_search(query):
-    print(f"[Scout Agent] Searching Exa for: {query}")
-    return f"Exa Search Result for '{query}': Found similar issue in internal docs. Root cause is typically a misconfigured Auth0 audience in the prod environment."
+    if exa:
+        print(f"[Scout Agent] Performing REAL Exa Search for: {query}")
+        try:
+            results = exa.search_and_contents(query, num_results=2, use_autoprompt=True)
+            context = "\n".join([f"- {r.title}: {r.text[:300]}..." for r in results.results])
+            return f"Exa Search Results for '{query}':\n{context}"
+        except Exception as e:
+            return f"Exa Search failed: {e}"
+    else:
+        print(f"[Scout Agent] Mock Searching Exa for: {query}")
+        return f"Exa Search Result for '{query}': Found similar issue in internal docs. Root cause is typically a misconfigured Auth0 audience in the prod environment."
 
 def delivery_report(err, msg):
     if err is not None:

@@ -29,11 +29,15 @@ To ensure the high-stakes Executive Agent performs safely, we used the **ToolGra
    ```
 
 3. **Configure Environment Variables:**
-   Add your keys to the `.env` file:
-   - `SLACK_APP_TOKEN`
-   - `SLACK_BOT_TOKEN`
-   - `EXA_API_KEY`
-   - `OPENROUTER_API_KEY`
+   Add your keys to the `.env` file at the root of the project:
+   - `SLACK_APP_TOKEN=xapp-...`
+   - `SLACK_BOT_TOKEN=xoxb-...`
+   - `EXA_API_KEY=your-key` (Optional: leave as `mock-exa-key` to use the simulated responses for testing)
+   - `OPENROUTER_API_KEY=your-key` (Optional: leave as `mock-openrouter-key` to use the simulated responses)
+   - `AUTH0_DOMAIN=your-tenant.auth0.com` (Optional: leave as `mock-auth0-domain` to bypass)
+   - `AUTH0_CLIENT_ID=your-client-id`
+   - `AUTH0_CLIENT_SECRET=your-client-secret`
+   - `AUTH0_AUDIENCE=your-api-audience`
 
 4. **Run the Microservices (in separate terminals):**
    ```bash
@@ -46,3 +50,45 @@ To ensure the high-stakes Executive Agent performs safely, we used the **ToolGra
 ## Documentation
 - See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagrams.
 - See [AGENT_FLOWS.md](AGENT_FLOWS.md) for internal agent logic and event contracts.
+
+## How the topics were created
+
+I am showing the exact Kafka command and the reason it works in this project so you can recreate or verify it on your own.
+
+This project uses Redpanda, which is Kafka-compatible, and the topic creation was done with the `rpk` CLI inside the running Docker container:
+
+`powershell
+docker exec redpanda rpk topic create slack-inbound slack-outbound agent-context --brokers localhost:9092 --if-not-exists
+`
+
+### What this does
+- `docker exec redpanda ...` → runs a command inside the running Redpanda container
+- `rpk topic create ...` → creates Kafka topics
+- `slack-inbound slack-outbound agent-context` → the three topics used by the app
+- `--brokers localhost:9092` → connects to the Kafka endpoint exposed by Redpanda
+- `--if-not-exists` → avoids failing if the topics already exist
+
+### Why it was needed
+Each agent subscribes to a Kafka topic at startup. If the topic is missing, the consumer gets:
+
+`	ext
+KafkaError{code=UNKNOWN_TOPIC_OR_PART,...}
+`
+
+That is exactly why the startup error happens if the topics don't exist.
+
+### Verify the topics
+You can check them with:
+
+`powershell
+docker exec redpanda rpk topic list --brokers localhost:9092
+`
+
+Or inspect one topic:
+
+`powershell
+docker exec redpanda rpk topic describe slack-inbound --brokers localhost:9092
+`
+
+### In this repo
+The broker itself is started from `docker-compose.yml`, and the topics are automatically created in `start_all.bat` before the Python services launch using the exact pattern the app expects.

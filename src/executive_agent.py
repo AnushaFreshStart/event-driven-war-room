@@ -1,15 +1,45 @@
 import json
 import time
+import os
+import requests
 from confluent_kafka import Producer, Consumer, KafkaError
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 KAFKA_BROKER = 'localhost:9092'
-
 producer = Producer({'bootstrap.servers': KAFKA_BROKER})
 
+AUTH0_DOMAIN = os.environ.get("AUTH0_DOMAIN", "mock-auth0-domain")
+AUTH0_CLIENT_ID = os.environ.get("AUTH0_CLIENT_ID", "mock-auth0-client-id")
+AUTH0_CLIENT_SECRET = os.environ.get("AUTH0_CLIENT_SECRET", "mock-auth0-client-secret")
+AUTH0_AUDIENCE = os.environ.get("AUTH0_AUDIENCE", "mock-auth0-audience")
+
 def verify_auth0_permissions(user_id):
-    print(f"[Executive Agent] Verifying Auth0 M2M scopes for user {user_id}...")
-    time.sleep(1)
-    return True
+    if AUTH0_DOMAIN != "mock-auth0-domain" and AUTH0_CLIENT_ID and AUTH0_CLIENT_SECRET:
+        print(f"[Executive Agent] Fetching real Auth0 M2M token for API authorization...")
+        url = f"https://{AUTH0_DOMAIN}/oauth/token"
+        payload = {
+            "client_id": AUTH0_CLIENT_ID,
+            "client_secret": AUTH0_CLIENT_SECRET,
+            "audience": AUTH0_AUDIENCE,
+            "grant_type": "client_credentials"
+        }
+        try:
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+            token_data = response.json()
+            if token_data.get("access_token"):
+                print("[Executive Agent] Auth0 Token successfully acquired.")
+                return True
+            return False
+        except Exception as e:
+            print(f"[Executive Agent] Auth0 API failed: {e}")
+            return False
+    else:
+        print(f"[Executive Agent] Mock Verifying Auth0 M2M scopes for user {user_id}...")
+        time.sleep(1)
+        return True
 
 def execute_rollback():
     print(f"[Executive Agent] Executing rollback via API...")

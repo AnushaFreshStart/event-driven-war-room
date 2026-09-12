@@ -1,6 +1,6 @@
 # Agent Workflows & Event Contracts
 
-In an event-driven architecture, the logic of individual microservices (agents) and the shape of the data they pass (the event contracts) are the most critical pieces of documentation. 
+In an event-driven architecture, the logic of individual microservices (agents) and the shape of the data they pass (the event contracts) are the most critical pieces of documentation.
 
 Below are the detailed internal flow diagrams for each of the three AI agents, followed by the Kafka Topic Event Contracts.
 
@@ -8,22 +8,25 @@ Below are the detailed internal flow diagrams for each of the three AI agents, f
 
 ## 1. Scout Agent (The Researcher)
 
-The Scout Agent acts as an ambient listener. It uses a lightweight heuristic to decide if a message warrants expensive web/doc research via the Exa API, reducing unnecessary API calls and noise.
+The Scout Agent acts as an ambient listener. It uses keyword extraction to isolate error signatures from conversational noise before querying Exa, reducing unnecessary API calls and improving search quality.
 
 ```mermaid
 flowchart TD
     Start([Start Scout Agent]) --> Consume[Consume message from 'slack-inbound' topic]
-    Consume --> Parse[Parse JSON Payload]
-    Parse --> Check{Contains 'error', 'exception', <br> or 'traceback'?}
+    Consume --> ParseJSON{Parse JSON}
+    
+    ParseJSON -->|Parse Error| DLQ[Publish raw bytes to 'dead-letter' topic]
+    DLQ --> Consume
+    
+    ParseJSON -->|Success| Check{Contains error keywords? <br> error, exception, traceback, failed, <br> timeout, crash, outage, 500-504, OOM, panic}
     
     Check -->|No| Ignore[Ignore Event / Await Next]
     Ignore --> Consume
     
-    Check -->|Yes| Extract[Extract error context from text]
+    Check -->|Yes| Extract[Extract search query from text <br> Strip conversational filler <br> Isolate error codes & stack traces]
     Extract --> CallExa[[Call Exa Search API]]
-    CallExa --> Wait{Wait for Results}
-    Wait --> Format[Format findings into 'research_context']
-    Format --> Package[Construct 'context_event' JSON]
+    CallExa --> Format[Format findings into 'research_context']
+    Format --> Package[Construct 'context_event' JSON <br> Include event_id, thread_ts, timestamp]
     Package --> Publish[Publish to 'agent-context' topic]
     Publish --> Consume
 ```
@@ -32,20 +35,26 @@ flowchart TD
 
 ## 2. Diagnoser Agent (The Brain)
 
-The Diagnoser Agent is strictly triggered by context events. It offloads the "searching" to the Scout, acting solely as a synthesizer. It leverages high-end LLMs via OpenRouter to read the raw error alongside the Exa research, generating actionable advice.
+The Diagnoser subscribes to **both** `slack-inbound` and `agent-context`. It maintains a sliding window of recent channel messages so the LLM has full conversation history when synthesizing a diagnosis, not just a single error line.
 
 ```mermaid
 flowchart TD
-    Start([Start Diagnoser Agent]) --> Consume[Consume message from 'agent-context' topic]
-    Consume --> Parse[Parse JSON Payload]
-    Parse --> Extract[Extract 'original_text' and 'research_context']
+    Start([Start Diagnoser Agent]) --> Consume[Consume message from <br> 'slack-inbound' OR 'agent-context']
+    Consume --> ParseJSON{Parse JSON}
     
-    Extract --> Prompt[Construct System Prompt]
-    Prompt --> CallLLM[[Call OpenRouter API <br> e.g. Claude 3.5 Sonnet]]
-    CallLLM --> Wait{Wait for Inference}
+    ParseJSON -->|Parse Error| DLQ[Publish raw bytes to 'dead-letter' topic]
+    DLQ --> Consume
     
-    Wait --> Format[Format Diagnosis Markdown]
-    Format --> Package[Construct 'response_event' JSON]
+    ParseJSON -->|Success| WhichTopic{Which topic?}
+    
+    WhichTopic -->|slack-inbound| Buffer[Store in per-channel <br> sliding window buffer <br> max 20 messages]
+    Buffer --> Consume
+    
+    WhichTopic -->|agent-context| Gather[Retrieve buffered conversation <br> history for this channel]
+    Gather --> Prompt[Construct enriched system prompt: <br> • Severity assessment Sev-1 to Sev-4 <br> • Affected service identification <br> • Immediate mitigation steps <br> • Rollback recommendation]
+    Prompt --> CallLLM[[Call OpenRouter API]]
+    CallLLM --> Format[Format Diagnosis with severity tag]
+    Format --> Package[Construct 'response_event' JSON <br> Include event_id, thread_ts, timestamp]
     Package --> Publish[Publish to 'slack-outbound' topic]
     Publish --> Consume
 ```
@@ -54,27 +63,36 @@ flowchart TD
 
 ## 3. Executive Agent (The Actor)
 
-The Executive Agent listens directly to the human conversation for explicit commands. Because it has the ability to mutate state (e.g., reverting a deployment), it enforces a strict authorization gate using Auth0 before calling any tools.
+The Executive Agent listens for explicit action commands. It enforces a strict Auth0 authorization gate with **token caching** (tokens are cached for 24 hours with a 5-minute safety buffer) and supports multiple commands.
 
 ```mermaid
 flowchart TD
     Start([Start Executive Agent]) --> Consume[Consume message from 'slack-inbound' topic]
-    Consume --> Parse[Parse JSON Payload]
-    Parse --> Check{Contains command <br> 'execute rollback'?}
+    Consume --> ParseJSON{Parse JSON}
     
-    Check -->|No| Ignore[Ignore Event / Await Next]
+    ParseJSON -->|Parse Error| DLQ[Publish raw bytes to 'dead-letter' topic]
+    DLQ --> Consume
+    
+    ParseJSON -->|Success| Check{Contains command?}
+    
+    Check -->|No match| Ignore[Ignore Event / Await Next]
     Ignore --> Consume
     
-    Check -->|Yes| Extract[Extract 'user_id']
-    Extract --> Auth0[[Call Auth0 API]]
-    Auth0 --> Verify{User has 'admin:rollback' scope?}
+    Check -->|execute rollback<br>restart service<br>scale up| Extract[Extract 'user_id' and command type]
+    Extract --> TokenCache{Cached Auth0 <br> token valid?}
+    
+    TokenCache -->|Yes| UseToken[Use cached token]
+    TokenCache -->|No / Expired| Auth0[[Fetch new token from Auth0 <br> Cache with 5-min buffer]]
+    Auth0 --> UseToken
+    
+    UseToken --> Verify{User authorized?}
     
     Verify -->|No| Reject[Format Rejection Message]
-    Reject --> Publish
+    Reject --> Package
     
-    Verify -->|Yes| Tool[[Execute Rollback API / Tool]]
+    Verify -->|Yes| Tool[[Execute Action <br> Rollback / Restart / Scale]]
     Tool --> Success[Format Success Message]
-    Success --> Package[Construct 'response_event' JSON]
+    Success --> Package[Construct 'response_event' JSON <br> Include event_id, thread_ts, timestamp]
     
     Package --> Publish[Publish to 'slack-outbound' topic]
     Publish --> Consume
@@ -82,19 +100,45 @@ flowchart TD
 
 ---
 
-## 4. Event Stream Contracts (Data Dictionary)
+## 4. Slack Gateway (The Bridge)
 
-In an event-driven Multi-Agent System, the agents are entirely decoupled. They don't know *who* is reading their data. Therefore, the JSON schemas flowing through Kafka act as the strict API contracts.
+The Gateway bridges Slack and Kafka with production-grade reliability features.
+
+```mermaid
+flowchart TD
+    subgraph "Inbound (Slack → Kafka)"
+        SlackIn[Slack SocketMode Event] --> Dedup{Seen this <br> client_msg_id?}
+        Dedup -->|Duplicate| Drop[Drop silently]
+        Dedup -->|New| Enrich[Generate UUID event_id <br> Capture thread_ts <br> Add ISO timestamp]
+        Enrich --> PubIn[Publish to 'slack-inbound']
+    end
+
+    subgraph "Outbound (Kafka → Slack)"
+        ConOut[Consume from 'slack-outbound'] --> ParseOut{Parse JSON}
+        ParseOut -->|Error| DLQ[Publish to 'dead-letter']
+        ParseOut -->|Success| Post[chat_postMessage <br> with thread_ts]
+        Post --> RateCheck{HTTP 429?}
+        RateCheck -->|No| Done[Delivered]
+        RateCheck -->|Yes| Backoff[Sleep Retry-After <br> Retry up to 3x]
+        Backoff --> Post
+    end
+```
+
+---
+
+## 5. Event Stream Contracts (Data Dictionary)
 
 ### Topic: `slack-inbound`
 **Produced by:** Slack Gateway
-**Consumed by:** Scout Agent, Executive Agent
-**Description:** Represents a raw message posted by a human in the Slack War Room.
+**Consumed by:** Scout Agent, Diagnoser Agent, Executive Agent
 ```json
 {
+  "event_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "channel_id": "C12345678",
   "user_id": "U98765432",
   "text": "We just got an exception: Auth0 unauthorized audience error on the prod server.",
+  "thread_ts": "1726182000.000100",
+  "timestamp": "2026-09-12T17:18:10Z",
   "is_mention": false
 }
 ```
@@ -102,12 +146,14 @@ In an event-driven Multi-Agent System, the agents are entirely decoupled. They d
 ### Topic: `agent-context`
 **Produced by:** Scout Agent
 **Consumed by:** Diagnoser Agent
-**Description:** Contains enriched background research related to a specific human message.
 ```json
 {
+  "event_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "channel_id": "C12345678",
-  "original_text": "We just got an exception: Auth0 unauthorized audience error on the prod server.",
-  "research_context": "Exa Search Result: This typically indicates a misconfigured Auth0 audience in the production environment variables.",
+  "thread_ts": "1726182000.000100",
+  "timestamp": "2026-09-12T17:18:12Z",
+  "original_text": "Auth0 unauthorized audience error on the prod server",
+  "research_context": "Exa Search Results: ...",
   "source": "exa_scout"
 }
 ```
@@ -115,10 +161,18 @@ In an event-driven Multi-Agent System, the agents are entirely decoupled. They d
 ### Topic: `slack-outbound`
 **Produced by:** Diagnoser Agent, Executive Agent
 **Consumed by:** Slack Gateway
-**Description:** Actionable responses, alerts, or tool-execution summaries to be posted back to the human engineers.
 ```json
 {
+  "event_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "channel_id": "C12345678",
-  "text": ":white_check_mark: *Executive Action Confirmed*\nUser <@U98765432> authorized via Auth0.\nResult: Rollback successful. Deployment reverted to previous stable state."
+  "thread_ts": "1726182000.000100",
+  "text": ":mag: *AI Diagnosis* (Sev-1)\n..."
 }
+```
+
+### Topic: `dead-letter`
+**Produced by:** Any agent on JSON parse failure
+**Consumed by:** Ops/Debug tooling
+```
+Raw bytes of the unparseable message for inspection.
 ```

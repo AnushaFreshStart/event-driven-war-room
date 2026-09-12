@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs / runtime
+*.log
+*.pid
+
+# Docker
+*.tar
+
+# Local runtime artifacts
+toolgrad_dataset.jsonl

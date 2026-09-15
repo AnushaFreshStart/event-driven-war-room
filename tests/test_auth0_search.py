@@ -1,0 +1,10 @@
+import os, requests
+from dotenv import load_dotenv
+load_dotenv()
+AUTH0_DOMAIN = os.environ.get('AUTH0_DOMAIN')
+token = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InFpWHN3Rk1uaHhwZm9abGJkcXBPWSJ9.eyJpc3MiOiJodHRwczovL2Rldi16cTJ6aXdzd3lxdjZoaTR0LnVzLmF1dGgwLmNvbS8iLCJzdWIiOiJHN29hSHdBdXJFdFZCRm1rYlpjRWltbU9Bem1LOUg4Z0BjbGllbnRzIiwiYXVkIjoiaHR0cHM6Ly9kZXYtenEyeml3c3d5cXY2aGk0dC51cy5hdXRoMC5jb20vYXBpL3YyLyIsImlhdCI6MTc4OTI1OTgzMiwiZXhwIjoxNzg5MzQ2MjMyLCJzY29wZSI6InJlYWQ6dXNlcnMgcmVhZDpyb2xlcyIsImd0eSI6ImNsaWVudC1jcmVkZW50aWFscyIsImF6cCI6Ikc3b2FId0F1ckV0VkJGbWtiWmNFaW1tT0F6bUs5SDhnIn0.K5OpW_nMC3TtG48rmBmfYVz8j5nPzHschnWpPIIq6r4gEztrGhmcQNwouvP1hz4isCpuTfjaZ-whV2Kz0FD9Gl0WbB63q3Wzcb73_Kua4l1K1wkJ4859WpAR05_FfSHQsEZDlNGKwIL_8R1IqQlVPcNNaHlCbUS0seKdLs-gaJ4-8aZC5h3RS_2HNBIwMJfHzP7eMp4NcAqHYEswQ8R8va7J_oIbbUgpCAo_uOtuEPAm75R9hBWcpfXUJ5l44QFd6RFodyKosAzrqq3w9FIs-LYvoq9zz-sA765JXYm6xagxAruEmwWkcdSJyNlgsmQIE4izrmGRoJ8pH_UyjGr2Nw'
+user_id = 'U123456'
+url = f'https://{AUTH0_DOMAIN}/api/v2/users'
+params = {'q': f'user_id:\"*{user_id}*\"', 'search_engine': 'v3'}
+r = requests.get(url, headers={'Authorization': f'Bearer {token}'}, params=params)
+print(r.status_code, r.text)

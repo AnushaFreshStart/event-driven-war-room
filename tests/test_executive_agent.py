@@ -50,3 +50,27 @@ def test_token_manager_get_token_failure_401(mock_post):
     assert token is None
     mock_post.assert_called_once()
     assert token_mgr._token is None
+
+@patch('src.executive_agent.requests.get')
+@patch('src.executive_agent.requests.post')
+def test_verify_auth0_permissions_real_flow_hits_auth0(mock_post, mock_get):
+    """Real Auth0 mode should reach an Auth0 endpoint instead of silently succeeding."""
+    mock_post_response = MagicMock()
+    mock_post_response.json.return_value = {"access_token": "valid_token", "expires_in": 3600}
+    mock_post.return_value = mock_post_response
+
+    mock_get_response = MagicMock()
+    mock_get_response.status_code = 200
+    mock_get_response.json.return_value = [{"sub": "auth0|user-1"}]
+    mock_get.return_value = mock_get_response
+
+    import src.executive_agent as executive_agent
+    executive_agent.AUTH0_DOMAIN = "tenant.auth0.com"
+    executive_agent.AUTH0_CLIENT_ID = "client-id"
+    executive_agent.AUTH0_CLIENT_SECRET = "client-secret"
+    executive_agent.AUTH0_AUDIENCE = "https://api.example.com"
+
+    assert executive_agent.verify_auth0_permissions("U_TEST") is True
+    mock_post.assert_called_once()
+    mock_get.assert_called_once()
+    assert "Authorization" in mock_get.call_args.kwargs["headers"]
